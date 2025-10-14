@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audiobook Narration Assistant</title>
+    <link id="font-link-poppins" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.7.1/mammoth.browser.min.js"></script>
+    <style>
+        :root {
+            --bg-dark-gradient: radial-gradient(circle at top left, #4A5568, #1A202C);
+            --card-bg: rgba(45, 55, 72, 0.65);
+            --card-bg-solid: #2D3748;
+            --teleprompter-bg: #1A202C;
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #E2E8F0;
+            --text-secondary: #A0AEC0;
+            --shadow-color: rgba(0, 0, 0, 0.3);
+            --accent-primary: #4299E1;
+            --accent-secondary: #a0aec04d;
+            --highlight-bg: #a0aec033;
+            --speed-up-color: #48BB78;
+            --slow-down-color: #3182CE;
+            --emphasize-color: #E53E3E;
+            --raise-pitch-color: #F6AD55;
+            --lower-pitch-color: #805AD5;
+            --whisper-color: #CBD5E0;
+            --pause-color: #F6AD55;
+            --font-main: 'Poppins', sans-serif;
+            --script-font: var(--font-main);
+        }
+        body.light-mode {
+            --bg-dark-gradient: linear-gradient(to top, #fffdd5 0%, #faf8e8 100%);
+            --card-bg: rgba(255, 253, 213, 0.5);
+            --card-bg-solid: rgba(255, 253, 213, 0.95);
+            --teleprompter-bg: #fffdd5;
+            --border-color: rgba(0, 0, 0, 0.1);
+            --text-primary: #2D3748;
+            --text-secondary: #718096;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --accent-secondary: #4299e133;
+            --highlight-bg: #4299e133;
+            --whisper-color: #718096;
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-main);
+            background: var(--bg-dark-gradient);
+            background-size: 200% 200%;
+            color: var(--text-primary);
+            padding: 40px;
+            -webkit-font-smoothing: antialiased;
+            transition: background 0.4s ease, color 0.4s ease;
+        }
+        body.focus-active { padding: 20px; }
+        .main-title {
+            text-align: center;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 40px;
+            color: var(--text-primary);
+            text-shadow: 0 4px 15px var(--shadow-color);
+            transition: all 0.4s ease;
+        }
+        body.focus-active .main-title { opacity: 0; visibility: hidden; height: 0; margin: 0; padding: 0; }
+        .app-layout { display: grid; grid-template-columns: 1fr 3fr 1fr; gap: 30px; max-width: 1600px; margin: 0 auto; transition: grid-template-columns 0.4s ease, gap 0.4s ease; }
+        .app-layout.suggestions-hidden { grid-template-columns: 0fr 3fr 1fr; }
+        .app-layout.focus-mode { grid-template-columns: 0 1fr 0; gap: 0; }
+        .app-layout.focus-mode .suggestions-panel, .app-layout.focus-mode .sidebar { opacity: 0; visibility: hidden; padding: 0; border: none; transform: scale(0.95); }
+        .panel { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 25px; backdrop-filter: blur(20px); box-shadow: 0 10px 30px var(--shadow-color), inset 0 1px 1px 0 rgba(255, 255, 255, 0.05); transition: all 0.3s ease; }
+        .suggestions-panel { overflow-y: auto; opacity: 1; visibility: visible; transition: opacity 0.4s ease, visibility 0.4s, transform 0.3s ease; }
+        .suggestions-panel.hidden { opacity: 0; visibility: hidden; padding: 0; border: none; }
+        .suggestions-panel h2 { font-size: 1.2rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1.5px; }
+        .suggestion-item { margin-bottom: 20px; padding: 15px; border-bottom: 1px solid var(--border-color); transition: all 0.2s ease; border-radius: 8px; cursor: pointer; }
+        .suggestion-item:last-child { border-bottom: none; }
+        .suggestion-item p { font-size: 0.95rem; line-height: 1.6; color: var(--text-secondary); }
+        .suggestion-item strong { font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 8px; font-size: 1rem; }
+        .script-panel { padding: 50px; }
+        .script-panel h2 { font-size: 1.2rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1.5px; }
+        #script-content {
+            font-size: 1.3rem;
+            line-height: 2.2;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            transition: font-size 0.2s ease, line-height 0.2s ease;
+            font-family: var(--script-font);
+        }
+        #script-content h1, #script-content h4, #teleprompter-content h1, #teleprompter-content h4 {
+            font-family: var(--font-main);
+            text-decoration: underline;
+            margin: 1.5em 0 1em 0;
+            line-height: 1.4;
+        }
+        #script-content h1, #teleprompter-content h1 { font-size: 1.5em; }
+        #script-content h4, #teleprompter-content h4 { font-size: 1.2em; }
+        .progress-container { width: 100%; height: 8px; background-color: rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden; margin-bottom: 1.5rem; display: none; }
+        .progress-bar { width: 100%; height: 100%; background-color: var(--accent-primary); background-image: linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent); background-size: 40px 40px; animation: progress-bar-stripes 2s linear infinite; }
+        @keyframes progress-bar-stripes { from { background-position: 40px 0; } to { background-position: 0 0; } }
+        
+        .narration-text[class*=" "]:not(.narration-text.normal) {
+            display: inline-flex;
+            align-items: center;
+        }
+        .narration-text { font-weight: 500; transition: background-color 0.2s ease, color 0.2s ease; border-radius: 4px; cursor: pointer; }
+        .narration-text.speed-up { color: var(--speed-up-color); }
+        .narration-text.slow-down { color: var(--slow-down-color); }
+        .narration-text.emphasize { color: var(--emphasize-color); }
+        .narration-text.raise-pitch { color: var(--raise-pitch-color); }
+        .narration-text.lower-pitch { color: var(--lower-pitch-color); }
+        .narration-text.whisper { color: var(--whisper-color); font-style: italic; }
+        .narration-text.pause {
+            color: var(--pause-color);
+            font-weight: 700;
+        }
+        #script-content.highlights-enabled .narration-text.speed-up, #script-content.highlights-enabled .narration-text.highlight.speed-up { background-color: rgba(72, 187, 120, 0.15); padding: 0.1em 0.4em; border-radius: 5px; }
+        #script-content.highlights-enabled .narration-text.slow-down, #script-content.highlights-enabled .narration-text.highlight.slow-down { background-color: rgba(49, 130, 206, 0.15); padding: 0.1em 0.4em; border-radius: 5px; }
+        #script-content.highlights-enabled .narration-text.emphasize, #script-content.highlights-enabled .narration-text.highlight.emphasize { background-color: rgba(229, 62, 62, 0.15); padding: 0.1em 0.4em; border-radius: 5px; }
+        #script-content.highlights-enabled .narration-text.raise-pitch, #script-content.highlights-enabled .narration-text.highlight.raise-pitch { background-color: rgba(246, 173, 85, 0.2); padding: 0.1em 0.4em; border-radius: 5px; }
+        #script-content.highlights-enabled .narration-text.lower-pitch, #script-content.highlights-enabled .narration-text.highlight.lower-pitch { background-color: rgba(128, 90, 213, 0.15); padding: 0.1em 0.4em; border-radius: 5px; }
+        #script-content.highlights-enabled .narration-text.whisper, #script-content.highlights-enabled .narration-text.highlight.whisper { background-color: rgba(203, 213, 224, 0.15); padding: 0.1em 0.4em; border-radius: 5px; }
+        #script-content.highlights-enabled .narration-text.pause, #script-content.highlights-enabled .narration-text.highlight.pause { background-color: rgba(246, 173, 85, 0.2); padding: 0.1em 0.4em; border-radius: 5px; }
+        .suggestion-item.highlight { background-color: var(--accent-secondary); transform: scale(1.02); }
+        .narration-text.highlight { background-color: var(--highlight-bg); }
+        .sidebar { align-self: start; display: flex; flex-direction: column; gap: 20px; position: sticky; top: 40px; }
+        .sidebar-card { padding: 25px; }
+        .sidebar-card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 20px; }
+        .legend-item { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 0.95rem; }
+        .legend-item span {
+            padding: 5px 12px;
+            border-radius: 8px;
+            font-weight: 500;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+        }
+        body.light-mode .legend-item span {
+            color: #1A202C;
+            text-shadow: none;
+        }
+        .action-button { text-align: center; padding: 20px; cursor: pointer; border: none; transition: all 0.3s ease; border-radius: 16px; font-weight: 600; font-size: 1.1rem; color: #fff; box-shadow: 0 4px 15px var(--shadow-color); }
+        .action-button:hover { transform: translateY(-4px); box-shadow: 0 10px 25px var(--shadow-color); }
+        .action-button:active { transform: translateY(-1px) scale(0.98); box-shadow: 0 2px 10px var(--shadow-color); }
+        .upload-button { background: var(--accent-primary); }
+        .teleprompter-button {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0));
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            color: var(--text-primary);
+        }
+        body.light-mode .teleprompter-button {
+             background: linear-gradient(135deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.2));
+             border: 1px solid rgba(255, 255, 255, 0.4);
+             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+             color: var(--text-primary);
+        }
+        .toggle-button { background: var(--accent-secondary); }
+        .theme-button { background: var(--accent-secondary); color: var(--text-primary); }
+        .focus-button { background: var(--accent-secondary); }
+        .exit-focus-button { display: none; position: fixed; top: 20px; right: 20px; z-index: 1000; background: var(--accent-primary); }
+        body.focus-active .exit-focus-button { display: block; }
+        .upload-section input[type="file"] { display: none; }
+        .readability-control { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-size: 1rem; }
+        .font-upload-button {
+            width: 100%;
+            padding: 8px 12px;
+            background: var(--accent-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+        .readability-control:last-child { margin-bottom: 0; }
+        .readability-control span { color: var(--text-secondary); }
+        .control-button { background: var(--accent-secondary); border: none; color: var(--text-primary); width: 35px; height: 35px; border-radius: 8px; font-size: 1.2rem; font-weight: 600; cursor: pointer; margin-left: 5px; transition: transform 0.1s ease; }
+        .control-button:active { transform: scale(0.9); }
+        .narration-text[data-instruction]::after { content: attr(data-instruction); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 8px; background-color: var(--text-primary); color: var(--card-bg); padding: 6px 12px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; white-space: nowrap; z-index: 10; opacity: 0; visibility: hidden; transition: opacity 0.2s ease, visibility 0.2s ease; pointer-events: none; }
+        .narration-text[data-instruction]:hover::after { opacity: 1; visibility: visible; }
+        .toggle-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--accent-secondary); transition: .4s; border-radius: 28px; }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--accent-primary); }
+        input:checked + .slider:before { transform: translateX(22px); }
+        .narration-icon {
+            font-size: 0.9em;
+            margin-right: 0.15em;
+            opacity: 0.7;
+            display: none;
+        }
+        #script-content.icons-enabled .narration-icon { display: inline; }
+        .control-select { background: var(--accent-secondary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 5px 10px; border-radius: 8px; font-family: 'Poppins', sans-serif; font-size: 0.9rem; }
+        .annotation-menu { display: none; position: absolute; z-index: 100; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; box-shadow: 0 5px 15px var(--shadow-color); backdrop-filter: blur(10px); }
+        .menu-item { padding: 8px 12px; cursor: pointer; border-radius: 6px; font-size: 0.9rem; font-weight: 500; transition: background-color 0.2s ease; white-space: nowrap; }
+        .menu-item:hover { background-color: var(--highlight-bg); }
+        .control-textarea {
+            width: 100%;
+            background: var(--accent-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px;
+            border-radius: 8px;
+            font-family: 'Poppins', sans-serif;
+            font-size: 0.9rem;
+            min-height: 100px;
+            margin-top: 10px;
+            resize: vertical;
+        }
+        #teleprompter-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--teleprompter-bg);
+            z-index: 2000;
+            display: none;
+            flex-direction: column;
+            color: var(--text-primary);
+        }
+        #teleprompter-controls {
+            padding: 15px 20px;
+            background-color: rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            flex-shrink: 0;
+            border-top: 1px solid var(--border-color);
+        }
+        #teleprompter-controls .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #teleprompter-controls label {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        #teleprompter-controls input[type="range"] {
+            width: 120px;
+        }
+        #teleprompter-controls button {
+            background: var(--accent-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        #teleprompter-controls button.active {
+            background-color: var(--accent-primary);
+            color: white;
+        }
+        #teleprompter-content-wrapper {
+            flex-grow: 1;
+            overflow-y: scroll;
+            scroll-behavior: auto;
+            padding: 5vh 10vw;
+            position: relative;
+        }
+        #teleprompter-content {
+            font-size: 3rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding-bottom: 80vh;
+            font-family: var(--script-font);
+        }
+        #teleprompter-overlay.focus-enabled #teleprompter-content-wrapper {
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 70%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 70%, transparent 100%);
+        }
+    </style>
+</head>
+<body>
+    <h1 class="main-title">Audiobook Narration Assistant</h1>
+    <div class="app-layout" id="app-layout">
+        <aside class="suggestions-panel panel" id="suggestions-panel">
+            <h2>Suggestions</h2>
+            <div id="suggestions-content"></div>
+        </aside>
+
+        <main class="script-panel panel">
+            <h2>Performance Script</h2>
+            <div class="progress-container" id="progress-container"></div>
+            <div id="script-content"></div>
+        </main>
+
+        <aside class="sidebar">
+            <div class="sidebar-card panel">
+                <h3>Performance Guide</h3>
+                <div class="legend-item"><span style="background-color: var(--speed-up-color);">⚡️ Speed Up</span></div>
+                <div class="legend-item"><span style="background-color: var(--slow-down-color);">🐢 Slow Down</span></div>
+                <div class="legend-item"><span style="background-color: var(--emphasize-color);">❗️ Emphasize</span></div>
+                <div class="legend-item"><span style="background-color: var(--raise-pitch-color);">🔼 Raise Pitch</span></div>
+                <div class="legend-item"><span style="background-color: var(--lower-pitch-color);">🔽 Lower Pitch</span></div>
+                <div class="legend-item"><span style="background-color: var(--whisper-color);">🤫 Whisper / Softer</span></div>
+                <div class="legend-item"><span style="background-color: var(--pause-color);">... Dramatic Pause</span></div>
+            </div>
+
+            <div class="sidebar-card panel">
+                <h3>Readability Controls</h3>
+                <div class="readability-control">
+                    <span>Font Family</span>
+                    <select id="font-select" class="control-select" onchange="changeFont(this)">
+                        <option value="'Poppins', sans-serif" data-font-name="Poppins">Poppins</option>
+                        <option value="'Roboto Slab', serif" data-font-name="Roboto Slab">Roboto Slab</option>
+                        <option value="'Merriweather', serif" data-font-name="Merriweather">Merriweather</option>
+                        <option value="'Lora', serif" data-font-name="Lora">Lora</option>
+                        <option value="'Source Sans 3', sans-serif" data-font-name="Source Sans 3">Source Sans</option>
+                    </select>
+                </div>
+                <div class="readability-control">
+                    <span>Upload Font</span>
+                    <input type="file" id="font-upload-input" accept=".ttf,.otf,.woff,.woff2" style="display: none;">
+                    <button class="font-upload-button" onclick="document.getElementById('font-upload-input').click()">Choose File</button>
+                </div>
+                <div class="readability-control">
+                    <span>Font Size</span>
+                    <div>
+                        <button class="control-button" onclick="changeFontSize(-0.1)">-</button>
+                        <button class="control-button" onclick="changeFontSize(0.1)">+</button>
+                    </div>
+                </div>
+                <div class="readability-control">
+                    <span>Line Spacing</span>
+                    <div>
+                        <button class="control-button" onclick="changeLineHeight(-0.1)">-</button>
+                        <button class="control-button" onclick="changeLineHeight(0.1)">+</button>
+                    </div>
+                </div>
+                <div class="readability-control">
+                    <span>Show Icons</span>
+                    <label class="toggle-switch"><input type="checkbox" onchange="toggleIcons(this.checked)"><span class="slider"></span></label>
+                </div>
+                <div class="readability-control">
+                    <span>Show Highlights</span>
+                    <label class="toggle-switch"><input type="checkbox" onchange="toggleHighlights(this.checked)"><span class="slider"></span></label>
+                </div>
+            </div>
+            
+            <div class="sidebar-card panel">
+                <h3>AI Controls</h3>
+                <div class="readability-control">
+                    <span>Creativity Level</span>
+                    <select id="creativity-select" class="control-select">
+                        <option value="subtle">Subtle</option>
+                        <option value="balanced" selected>Balanced</option>
+                        <option value="dramatic">Dramatic</option>
+                    </select>
+                </div>
+                <div class="readability-control">
+                    <span>Narrator Profile</span>
+                     <select id="style-select" class="control-select">
+                        <option value="neutral storyteller" selected>Authoritative & Clear</option>
+                        <option value="calm mentor">Calm & Reassuring</option>
+                        <option value="energetic youth">Energetic & Inspiring</option>
+                        <option value="grave detective">Grave Detective</option>
+                    </select>
+                </div>
+                <div>
+                    <span>Book Description / Core Message</span>
+                    <textarea id="book-description" class="control-textarea" placeholder="Paste the book's back cover description here to tailor the AI's suggestions to its specific tone and message..."></textarea>
+                </div>
+            </div>
+            
+            <button class="action-button teleprompter-button" onclick="startTeleprompter()">🖥️ Teleprompter Mode</button>
+            <button class="action-button focus-button" onclick="toggleFocusMode()">Focus Mode</button>
+            <button class="action-button theme-button" id="theme-toggle" onclick="toggleTheme()">Toggle Theme</button>
+            <button class="action-button toggle-button" onclick="toggleSuggestions()">Toggle Suggestions</button>
+            <div class="action-button upload-button upload-section" onclick="document.getElementById('fileInput').click();">
+                <input type="file" id="fileInput" onchange="analyzeFile()" accept=".txt,.docx">
+                <label>Upload New Script</label>
+            </div>
+        </aside>
+    </div>
+
+    <button class="action-button exit-focus-button" id="exit-focus-button" onclick="toggleFocusMode()">Exit Focus Mode</button>
+    <div id="annotation-menu" class="annotation-menu"></div>
+
+    <div id="teleprompter-overlay">
+        <div id="teleprompter-content-wrapper">
+            <div id="teleprompter-content"></div>
+        </div>
+        <div id="teleprompter-controls">
+            <div class="control-group">
+                <button id="teleprompter-scroll-toggle">▶️ Start Scroll</button>
+            </div>
+            <div class="control-group">
+                <label for="wpm-slider">Speed (WPM):</label>
+                <input type="range" id="wpm-slider" min="80" max="220" value="150">
+                <span id="wpm-display">150</span>
+            </div>
+            <div class="control-group">
+                <label>Font Size:</label>
+                <button onclick="changeTeleprompterFontSize(-0.2)">-</button>
+                <button onclick="changeTeleprompterFontSize(0.2)">+</button>
+            </div>
+            <div class="control-group">
+                <button id="teleprompter-focus-toggle" class="active">Focus: ON</button>
+            </div>
+             <div class="control-group">
+                <button onclick="stopTeleprompter()">❌ Close</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // All JavaScript is from the previous correct version, with fixes applied below.
+        let scriptFontSize = 1.3;
+        let scriptLineHeight = 2.2;
+        let showIcons = false;
+        let showHighlights = false;
+        let scrollAnimationId = null;
+        let isTeleprompterScrolling = false;
+        let teleprompterFontSize = 3;
+        let lastSelection = null;
+
+        const annotationMap = {
+            'speed-up':    { label: 'Speed Up',        text: null,  icon: '⚡️', emoji: '⚡️' },
+            'slow-down':   { label: 'Slow Down',       text: null,  icon: '🐢', emoji: '🐢' },
+            'emphasize':   { label: 'Emphasize',       text: null,  icon: '❗️', emoji: '❗️' },
+            'raise-pitch': { label: 'Raise Pitch',     text: null,  icon: '🔼', emoji: '🔼' },
+            'lower-pitch': { label: 'Lower Pitch',     text: null,  icon: '🔽', emoji: '🔽' },
+            'whisper':     { label: 'Whisper',         text: null,  icon: '🤫', emoji: '🤫' },
+            'pause':       { label: 'Dramatic Pause',  text: '...', icon: '',    emoji: '...' },
+            'normal':      { label: 'Remove Annotation', text: null,  icon: '',    emoji: '' }
+        };
+
+        const sampleAnalysis = [
+            {"text":"<h1>Welcome to the Audiobook Narration Assistant.</h1><p>This tool is designed to help you deliver a captivating performance.</p><p>Let's begin with a simple principle: <strong>variety is key.</strong> A monotone delivery can lose an audience, but a dynamic one can pull them into the story.</p><h4>Imagine a scene building with tension.</h4><p>You might start to speak more slowly, letting the weight of each word settle. Then, as the action peaks, you would suddenly speed up, carrying the listener along with the frantic energy of the moment.</p><p>Perhaps a character shares a secret. You'd lower your pitch, maybe even lean into a whisper, making the moment feel confidential and special.</p><p>Upload your own script using the button in the sidebar to get started!</p>"},
+        ];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'light') document.body.classList.add('light-mode');
+            const savedShowIcons = localStorage.getItem('showIcons');
+            const iconToggle = document.querySelector('input[onchange="toggleIcons(this.checked)"]');
+            if (savedShowIcons === 'true') { iconToggle.checked = true; toggleIcons(true); }
+            const savedShowHighlights = localStorage.getItem('showHighlights');
+            const highlightToggle = document.querySelector('input[onchange="toggleHighlights(this.checked)"]');
+            if (savedShowHighlights === 'true') { highlightToggle.checked = true; toggleHighlights(true); }
+            
+            document.addEventListener('keydown', (event) => { 
+                if (event.key === 'Escape' && document.body.classList.contains('focus-active')) toggleFocusMode();
+                if (event.key === 'Escape' && document.getElementById('teleprompter-overlay').style.display === 'flex') stopTeleprompter();
+            });
+            
+            document.addEventListener('click', (event) => { 
+                const menu = document.getElementById('annotation-menu'); 
+                if (!menu.contains(event.target) && !event.target.closest('#script-content')) {
+                    menu.style.display = 'none'; 
+                }
+            });
+            
+            displayResults(sampleAnalysis[0].text);
+            updateScriptStyle();
+            
+            document.getElementById('wpm-slider').addEventListener('input', (e) => {
+                document.getElementById('wpm-display').textContent = e.target.value;
+                if (isTeleprompterScrolling) {
+                    cancelAnimationFrame(scrollAnimationId);
+                    startAutoscroll();
+                }
+            });
+            document.getElementById('teleprompter-scroll-toggle').addEventListener('click', toggleAutoscroll);
+            document.getElementById('teleprompter-focus-toggle').addEventListener('click', toggleTeleprompterFocus);
+            document.getElementById('font-upload-input').addEventListener('change', handleFontUpload);
+        });
+        
+        function handleFontUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const fontDataUrl = e.target.result;
+                const fontName = 'UserUploadedFont';
+                const existingStyle = document.getElementById('custom-font-style');
+                if (existingStyle) existingStyle.remove();
+                const newStyle = document.createElement('style');
+                newStyle.id = 'custom-font-style';
+                newStyle.textContent = `@font-face { font-family: '${fontName}'; src: url('${fontDataUrl}'); }`;
+                document.head.appendChild(newStyle);
+                document.documentElement.style.setProperty('--script-font', `'${fontName}', sans-serif`);
+                const fontSelect = document.getElementById('font-select');
+                let customOption = fontSelect.querySelector('option[value="custom"]');
+                if (!customOption) {
+                    customOption = document.createElement('option');
+                    customOption.textContent = 'Custom: ' + file.name.substring(0, 15);
+                    customOption.value = 'custom';
+                    fontSelect.appendChild(customOption);
+                }
+                customOption.selected = true;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function changeFont(selectElement) {
+            const selectedOption = selectElement.options[selectElement.selectedIndex];
+            if (selectedOption.value === "custom") return;
+            const fontFamily = selectElement.value;
+            const fontName = selectedOption.dataset.fontName;
+            document.documentElement.style.setProperty('--script-font', fontFamily);
+            const existingLink = document.getElementById('dynamic-font-link');
+            if (existingLink) existingLink.remove();
+            if (fontName !== 'Poppins') {
+                const fontUrl = `https://fonts.googleapis.com/css2?family=${fontName.replace(/ /g, '+')}:wght@400;700&display=swap`;
+                const link = document.createElement('link');
+                link.id = 'dynamic-font-link';
+                link.rel = 'stylesheet';
+                link.href = fontUrl;
+                document.head.appendChild(link);
+            }
+        }
+
+        function toggleIcons(isChecked) {
+            document.getElementById('script-content').classList.toggle('icons-enabled', isChecked);
+            localStorage.setItem('showIcons', isChecked);
+        }
+
+        function toggleHighlights(isChecked) {
+            document.getElementById('script-content').classList.toggle('highlights-enabled', isChecked);
+            localStorage.setItem('showHighlights', isChecked);
+        }
+        
+        function updateScriptStyle() {
+            const scriptContent = document.getElementById('script-content');
+            scriptContent.style.fontSize = `${scriptFontSize}rem`;
+            scriptContent.style.lineHeight = scriptLineHeight;
+        }
+
+        function changeFontSize(amount) {
+            scriptFontSize = Math.max(0.8, Math.min(2.5, scriptFontSize + amount));
+            updateScriptStyle();
+        }
+
+        function changeLineHeight(amount) {
+            scriptLineHeight = Math.max(1.2, Math.min(3.5, scriptLineHeight + amount));
+            updateScriptStyle();
+        }
+
+        function toggleFocusMode() {
+            document.body.classList.toggle('focus-active');
+            document.getElementById('app-layout').classList.toggle('focus-mode');
+        }
+        
+        function toggleTheme() {
+            document.body.classList.toggle('light-mode');
+            localStorage.setItem('theme', document.body.classList.contains('light-mode') ? 'light' : 'dark');
+        }
+
+        function toggleSuggestions() {
+            document.getElementById('app-layout').classList.toggle('suggestions-hidden');
+            document.getElementById('suggestions-panel').classList.toggle('hidden');
+        }
+
+        function analyzeFile() {
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) return;
+            const scriptContent = document.getElementById('script-content');
+            const reader = new FileReader();
+            
+            const handleError = (err) => { console.error("File Read Error:", err); scriptContent.innerHTML = "Sorry, there was an error reading the file."; };
+            scriptContent.innerHTML = "Reading file...";
+
+            if (file.name.endsWith('.docx')) {
+                reader.onload = (e) => {
+                    mammoth.convertToHtml({ arrayBuffer: e.target.result })
+                        .then(result => {
+                           sendTextForAnalysis(result.value, true);
+                        })
+                        .catch(handleError);
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                reader.onload = (e) => sendTextForAnalysis(e.target.result, false);
+                reader.readAsText(file, 'UTF-8');
+            }
+            reader.onerror = handleError;
+        }
+        
+        async function sendTextForAnalysis(content, isHtml) {
+            const progressContainer = document.getElementById('progress-container');
+            const scriptContent = document.getElementById('script-content');
+            progressContainer.style.display = 'block';
+            scriptContent.innerHTML = "Processing script...";
+        
+            try {
+                await new Promise(resolve => setTimeout(resolve, 500)); 
+                let finalHtml = content;
+                if (!isHtml) {
+                    finalHtml = '<p>' + content.replace(/\n\s*\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+                }
+                displayResults(finalHtml);
+            } catch (error) {
+                scriptContent.innerHTML = `An error occurred: ${error.message}.`;
+                displayResults(sampleAnalysis[0].text);
+            } finally {
+                progressContainer.style.display = 'none';
+            }
+        }
+
+        function displayResults(htmlContent) {
+            const scriptContent = document.getElementById('script-content');
+            scriptContent.innerHTML = htmlContent;
+            document.getElementById('suggestions-content').innerHTML = '';
+            setupAnnotationEditing();
+        }
+
+        function setupAnnotationEditing() {
+            const scriptContent = document.getElementById('script-content');
+            scriptContent.addEventListener('mouseup', (event) => {
+                const selection = window.getSelection();
+                if (!selection.isCollapsed && scriptContent.contains(selection.anchorNode)) {
+                    lastSelection = selection.getRangeAt(0);
+                    openAnnotationMenu(event);
+                }
+            });
+        }
+        
+        function openAnnotationMenu(event) {
+            const menu = document.getElementById('annotation-menu');
+            menu.innerHTML = '';
+            Object.keys(annotationMap).forEach(typeKey => {
+                const anno = annotationMap[typeKey];
+                const menuItem = document.createElement('div');
+                menuItem.classList.add('menu-item');
+                menuItem.textContent = `${anno.emoji} ${anno.label}`;
+                menuItem.onclick = () => {
+                    applyAnnotationToSelection(typeKey);
+                    menu.style.display = 'none';
+                };
+                menu.appendChild(menuItem);
+            });
+            // Position menu relative to the script panel to avoid scrolling issues
+            const scriptPanel = document.querySelector('.script-panel');
+            const rect = scriptPanel.getBoundingClientRect();
+            menu.style.left = `${event.clientX - rect.left}px`;
+            menu.style.top = `${event.clientY - rect.top + scriptPanel.scrollTop}px`;
+            menu.style.display = 'block';
+        }
+
+        function applyAnnotationToSelection(newType) {
+            if (!lastSelection) return;
+            const selectedText = lastSelection.toString();
+            if (!selectedText) return;
+
+            // This is a simplified annotation. A real implementation would need to handle
+            // selections that cross HTML element boundaries more robustly.
+            const span = document.createElement('span');
+            span.className = 'narration-text ' + newType;
+            try {
+                lastSelection.surroundContents(span);
+            } catch (e) {
+                console.warn("Could not apply annotation across complex selection.", e);
+            }
+            
+            window.getSelection().removeAllRanges();
+            lastSelection = null;
+        }
+        
+        function startTeleprompter() {
+            const mainScriptContent = document.getElementById('script-content');
+            if (mainScriptContent.innerText.trim() === "") {
+                alert("Please upload a script first.");
+                return;
+            }
+            const teleprompterContent = document.getElementById('teleprompter-content');
+            const teleprompterOverlay = document.getElementById('teleprompter-overlay');
+            
+            teleprompterContent.innerHTML = mainScriptContent.innerHTML; 
+            teleprompterOverlay.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+
+            teleprompterOverlay.classList.add('focus-enabled');
+            document.getElementById('teleprompter-focus-toggle').textContent = 'Focus: ON';
+            document.getElementById('teleprompter-focus-toggle').classList.add('active');
+            document.getElementById('teleprompter-content').style.fontSize = `${teleprompterFontSize}rem`;
+        }
+
+        function stopTeleprompter() {
+            const teleprompterOverlay = document.getElementById('teleprompter-overlay');
+            const wrapper = document.getElementById('teleprompter-content-wrapper');
+            if (isTeleprompterScrolling) toggleAutoscroll();
+            teleprompterOverlay.style.display = 'none';
+            document.body.style.overflow = 'auto';
+            wrapper.scrollTop = 0;
+        }
+
+        function changeTeleprompterFontSize(amount) {
+            teleprompterFontSize = Math.max(1, Math.min(8, teleprompterFontSize + amount));
+            document.getElementById('teleprompter-content').style.fontSize = `${teleprompterFontSize}rem`;
+        }
+        
+        function toggleTeleprompterFocus() {
+            const overlay = document.getElementById('teleprompter-overlay');
+            const button = document.getElementById('teleprompter-focus-toggle');
+            overlay.classList.toggle('focus-enabled');
+            const isEnabled = overlay.classList.contains('focus-enabled');
+            button.textContent = isEnabled ? 'Focus: ON' : 'Focus: OFF';
+            button.classList.toggle('active', isEnabled);
+        }
+
+        function toggleAutoscroll() {
+            isTeleprompterScrolling = !isTeleprompterScrolling;
+            const toggleButton = document.getElementById('teleprompter-scroll-toggle');
+            if (isTeleprompterScrolling) {
+                toggleButton.textContent = '⏸️ Pause Scroll';
+                toggleButton.classList.add('active');
+                startAutoscroll();
+            } else {
+                toggleButton.textContent = '▶️ Start Scroll';
+                toggleButton.classList.remove('active');
+                cancelAnimationFrame(scrollAnimationId);
+            }
+        }
+        
+        function startAutoscroll() {
+            const wrapper = document.getElementById('teleprompter-content-wrapper');
+            const content = document.getElementById('teleprompter-content');
+            const wpm = parseInt(document.getElementById('wpm-slider').value, 10);
+            
+            const totalWords = content.innerText.trim().split(/\s+/).filter(word => word.length > 0).length;
+            if (totalWords === 0) { 
+                if (isTeleprompterScrolling) toggleAutoscroll();
+                return;
+            }
+
+            const totalMinutes = totalWords / wpm;
+            const totalDurationSeconds = totalMinutes * 60;
+            const scrollableHeight = wrapper.scrollHeight - wrapper.clientHeight;
+
+            if (scrollableHeight <= 0 || wrapper.scrollTop >= scrollableHeight) {
+                if (isTeleprompterScrolling) toggleAutoscroll();
+                return;
+            }
+            
+            const remainingScroll = scrollableHeight - wrapper.scrollTop;
+            const scrollPercentage = wrapper.scrollTop / scrollableHeight;
+            const elapsedTimeSeconds = totalDurationSeconds * scrollPercentage;
+            const remainingTimeSeconds = totalDurationSeconds - elapsedTimeSeconds;
+            
+            const pixelsPerSecond = (remainingTimeSeconds > 0) 
+                ? remainingScroll / remainingTimeSeconds
+                : scrollableHeight / totalDurationSeconds;
+
+            let lastTimestamp = performance.now();
+            
+            function scrollStep(timestamp) {
+                if (!isTeleprompterScrolling) return;
+
+                const deltaTime = timestamp - lastTimestamp;
+                lastTimestamp = timestamp;
+
+                const scrollAmount = (pixelsPerSecond * deltaTime) / 1000;
+                wrapper.scrollTop += scrollAmount;
+
+                if (wrapper.scrollTop >= scrollableHeight) {
+                    wrapper.scrollTop = scrollableHeight;
+                    if (isTeleprompterScrolling) toggleAutoscroll();
+                    return;
+                }
+                
+                scrollAnimationId = requestAnimationFrame(scrollStep);
+            }
+
+            scrollAnimationId = requestAnimationFrame(scrollStep);
+        }
+    </script>
+</body>
+</html>
+
