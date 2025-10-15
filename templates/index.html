@@ -93,7 +93,6 @@
         }
         #script-content h1, #teleprompter-content h1 { font-size: 1.5em; }
         #script-content h4, #teleprompter-content h4 { font-size: 1.2em; }
-        /* FIXED: Added margin to paragraphs for spacing */
         #script-content p, #teleprompter-content p {
             margin-bottom: 1.2em;
         }
@@ -147,6 +146,7 @@
         .action-button:hover { transform: translateY(-4px); box-shadow: 0 10px 25px var(--shadow-color); }
         .action-button:active { transform: translateY(-1px) scale(0.98); box-shadow: 0 2px 10px var(--shadow-color); }
         .upload-button { background: var(--accent-primary); }
+        .performance-notes-button { background: linear-gradient(135deg, #805AD5, #D53F8C); }
         .teleprompter-button {
             background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0));
             backdrop-filter: blur(12px);
@@ -270,15 +270,27 @@
             scroll-behavior: auto;
             padding: 5vh 10vw;
             position: relative;
+            transition: padding 0.2s ease-in-out;
         }
         #teleprompter-content {
             font-size: 3rem;
             line-height: 1.5;
             white-space: pre-wrap;
-            max-width: 1000px;
             margin: 0 auto;
             padding-bottom: 80vh;
             font-family: var(--script-font);
+        }
+        .teleprompter-word {
+            cursor: pointer;
+            border-radius: 3px;
+            background-color: transparent;
+            transition: background-color 0.3s ease;
+        }
+        .teleprompter-word.mistake-word {
+            background-color: rgba(229, 62, 62, 0.6); /* Red for mistake */
+        }
+        .teleprompter-word.sentence-start {
+            background-color: rgba(72, 187, 120, 0.6); /* Green for start */
         }
         #teleprompter-overlay.focus-enabled #teleprompter-content-wrapper {
             -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 70%, transparent 100%);
@@ -296,7 +308,7 @@
 
         <main class="script-panel panel">
             <h2>Performance Script</h2>
-            <div class="progress-container" id="progress-container"></div>
+            <div class="progress-container" id="progress-container"><div class="progress-bar"></div></div>
             <div id="script-content"></div>
         </main>
 
@@ -382,8 +394,12 @@
             <button class="action-button focus-button" onclick="toggleFocusMode()">Focus Mode</button>
             <button class="action-button theme-button" id="theme-toggle" onclick="toggleTheme()">Toggle Theme</button>
             <button class="action-button toggle-button" onclick="toggleSuggestions()">Toggle Suggestions</button>
+            <button class="action-button performance-notes-button" onclick="getPerformanceNotes()">✨ Get Performance Notes</button>
+            
+            <button class="action-button focus-button" onclick="clearAndResetScript()" style="background-color: var(--emphasize-color);">🔄 Clear & Reset Script</button>
+
             <div class="action-button upload-button upload-section" onclick="document.getElementById('fileInput').click();">
-                <input type="file" id="fileInput" onchange="analyzeFile()" accept=".txt,.docx">
+                <input type="file" id="fileInput" onchange="handleFileUpload()" accept=".txt,.docx">
                 <label>Upload New Script</label>
             </div>
         </aside>
@@ -401,9 +417,14 @@
                 <button id="teleprompter-scroll-toggle">▶️ Start Scroll</button>
             </div>
             <div class="control-group">
-                <label for="wpm-slider">Speed (WPM):</label>
-                <input type="range" id="wpm-slider" min="80" max="220" value="150">
-                <span id="wpm-display">150</span>
+                <label for="speed-select">Speed:</label>
+                <select id="speed-select" class="control-select">
+                    <option value="0.25">Very Slow</option>
+                    <option value="0.5">Slow</option>
+                    <option value="1" selected>Normal</option>
+                    <option value="1.5">Fast</option>
+                    <option value="2">Very Fast</option>
+                </select>
             </div>
             <div class="control-group">
                 <label>Font Size:</label>
@@ -414,6 +435,11 @@
                 <button id="teleprompter-focus-toggle" class="active">Focus: ON</button>
             </div>
              <div class="control-group">
+                <label>Margin:</label>
+                <button onclick="changeTeleprompterMargin(-1)">-</button>
+                <button onclick="changeTeleprompterMargin(1)">+</button>
+            </div>
+             <div class="control-group">
                 <button onclick="stopTeleprompter()">❌ Close</button>
             </div>
         </div>
@@ -421,7 +447,6 @@
 
 
     <script>
-        // All JavaScript is from the previous correct version, with fixes applied below.
         let scriptFontSize = 1.3;
         let scriptLineHeight = 2.2;
         let showIcons = false;
@@ -429,22 +454,33 @@
         let scrollAnimationId = null;
         let isTeleprompterScrolling = false;
         let teleprompterFontSize = 3;
+        let teleprompterMargin = 10;
         let lastSelection = null;
+        let highlightClearTimer = null;
+        let scrollAccumulator = 0;
+        
+        // --- Teleprompter State Variables ---
+        let currentScrollSpeed = 0; // pixels per second
+        let isDecelerating = false;
+        let decelerationStartTime = 0;
+        let initialSpeedOnDecelerate = 0;
+        let resumeScrollTimer = null;
+        const DECELERATION_DURATION = 1500; // ms
+        const POST_STOP_PAUSE = 1000; // ms
+
 
         const annotationMap = {
-            'speed-up':    { label: 'Speed Up',        text: null,  icon: '⚡️', emoji: '⚡️' },
-            'slow-down':   { label: 'Slow Down',       text: null,  icon: '🐢', emoji: '🐢' },
-            'emphasize':   { label: 'Emphasize',       text: null,  icon: '❗️', emoji: '❗️' },
-            'raise-pitch': { label: 'Raise Pitch',     text: null,  icon: '🔼', emoji: '🔼' },
-            'lower-pitch': { label: 'Lower Pitch',     text: null,  icon: '🔽', emoji: '🔽' },
-            'whisper':     { label: 'Whisper',         text: null,  icon: '🤫', emoji: '🤫' },
-            'pause':       { label: 'Dramatic Pause',  text: '...', icon: '',    emoji: '...' },
-            'normal':      { label: 'Remove Annotation', text: null,  icon: '',    emoji: '' }
+            'speed-up':    { label: 'Speed Up',        icon: '⚡️', emoji: '⚡️' },
+            'slow-down':   { label: 'Slow Down',       icon: '🐢', emoji: '🐢' },
+            'emphasize':   { label: 'Emphasize',       icon: '❗️', emoji: '❗️' },
+            'raise-pitch': { label: 'Raise Pitch',     icon: '🔼', emoji: '🔼' },
+            'lower-pitch': { label: 'Lower Pitch',     icon: '🔽', emoji: '🔽' },
+            'whisper':     { label: 'Whisper',         icon: '🤫', emoji: '🤫' },
+            'pause':       { label: 'Dramatic Pause',  icon: '...'},
+            'normal':      { label: 'Remove Annotation', icon: ''}
         };
 
-        const sampleAnalysis = [
-            {"text":"<h1>Welcome to the Audiobook Narration Assistant.</h1><p>This tool is designed to help you deliver a captivating performance.</p><p>Let's begin with a simple principle: <strong>variety is key.</strong> A monotone delivery can lose an audience, but a dynamic one can pull them into the story.</p><h4>Imagine a scene building with tension.</h4><p>You might start to speak more slowly, letting the weight of each word settle. Then, as the action peaks, you would suddenly speed up, carrying the listener along with the frantic energy of the moment.</p><p>Perhaps a character shares a secret. You'd lower your pitch, maybe even lean into a whisper, making the moment feel confidential and special.</p><p>Upload your own script using the button in the sidebar to get started!</p>"},
-        ];
+        const sampleText = `<h1>Welcome to the Audiobook Narration Assistant.</h1><p>This tool is designed to help you deliver a captivating performance.</p><p>Let's begin with a simple principle: <strong>variety is key.</strong> A monotone delivery can lose an audience, but a dynamic one can pull them into the story.</p><h4>Imagine a scene building with tension.</h4><p>You might start to speak more slowly, letting the weight of each word settle. Then, as the action peaks, you would suddenly speed up, carrying the listener along with the frantic energy of the moment.</p><p>Perhaps a character shares a secret. You'd lower your pitch, maybe even lean into a whisper, making the moment feel confidential and special.</p><p>Upload your own script using the button in the sidebar to get started!</p>`;
 
         document.addEventListener('DOMContentLoaded', () => {
             const savedTheme = localStorage.getItem('theme');
@@ -457,8 +493,63 @@
             if (savedShowHighlights === 'true') { highlightToggle.checked = true; toggleHighlights(true); }
             
             document.addEventListener('keydown', (event) => { 
-                if (event.key === 'Escape' && document.body.classList.contains('focus-active')) toggleFocusMode();
-                if (event.key === 'Escape' && document.getElementById('teleprompter-overlay').style.display === 'flex') stopTeleprompter();
+                const isTeleprompterActive = document.getElementById('teleprompter-overlay').style.display === 'flex';
+
+                if (event.key === 'Escape') {
+                    if (document.body.classList.contains('focus-active')) toggleFocusMode();
+                    if (isTeleprompterActive) stopTeleprompter();
+                    return;
+                }
+
+                if (isTeleprompterActive) {
+                    if (event.key === ' ' || event.code === 'Space') {
+                        event.preventDefault();
+                        toggleAutoscroll();
+                    }
+                    
+                    if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        const wrapper = document.getElementById('teleprompter-content-wrapper');
+                        const content = document.getElementById('teleprompter-content');
+                        const blocks = Array.from(content.querySelectorAll('p, h1, h4'));
+                        const currentScrollTop = wrapper.scrollTop;
+                        
+                        let currentBlockIndex = blocks.findIndex(block => block.offsetTop >= currentScrollTop);
+                        
+                        if (currentBlockIndex > 0) {
+                             const targetBlock = blocks[currentBlockIndex - 1];
+                             targetBlock.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else if (currentBlockIndex === -1 && blocks.length > 0) {
+                            blocks[blocks.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center'});
+                        }
+                    }
+
+                    // <<< NEW FEATURE: ARROWDOWN HOTKEY >>>
+                    if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        const wrapper = document.getElementById('teleprompter-content-wrapper');
+                        const content = document.getElementById('teleprompter-content');
+                        const blocks = Array.from(content.querySelectorAll('p, h1, h4'));
+                        const currentScrollTop = wrapper.scrollTop;
+
+                        // Find the first block that is below the current viewport top.
+                        // Add a small offset (1px) to avoid finding the current block if it's perfectly at the top.
+                        const nextBlock = blocks.find(block => block.offsetTop > currentScrollTop + 1);
+                        
+                        if (nextBlock) {
+                            // Scroll the next block to the top of the viewport
+                            nextBlock.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    }
+
+                    const speedMap = { '1': '0.25', '2': '0.5', '3': '1', '4': '1.5', '5': '2' };
+                    if (speedMap[event.key]) {
+                        event.preventDefault();
+                        const speedSelect = document.getElementById('speed-select');
+                        speedSelect.value = speedMap[event.key];
+                        speedSelect.dispatchEvent(new Event('change'));
+                    }
+                }
             });
             
             document.addEventListener('click', (event) => { 
@@ -468,13 +559,18 @@
                 }
             });
             
-            displayResults(sampleAnalysis[0].text);
+            const savedScript = localStorage.getItem('savedScriptContent');
+            if (savedScript) {
+                displayResults(savedScript);
+            } else {
+                displayResults(sampleText);
+            }
             updateScriptStyle();
             
-            document.getElementById('wpm-slider').addEventListener('input', (e) => {
-                document.getElementById('wpm-display').textContent = e.target.value;
-                if (isTeleprompterScrolling) {
+            document.getElementById('speed-select').addEventListener('change', () => {
+                if (isTeleprompterScrolling && !isDecelerating) {
                     cancelAnimationFrame(scrollAnimationId);
+                    scrollAnimationId = null;
                     startAutoscroll();
                 }
             });
@@ -482,6 +578,19 @@
             document.getElementById('teleprompter-focus-toggle').addEventListener('click', toggleTeleprompterFocus);
             document.getElementById('font-upload-input').addEventListener('change', handleFontUpload);
         });
+
+        function saveScriptState() {
+            const scriptHtml = document.getElementById('script-content').innerHTML;
+            localStorage.setItem('savedScriptContent', scriptHtml);
+        }
+
+        function clearAndResetScript() {
+            if (confirm("Are you sure you want to clear your current script and annotations? This cannot be undone.")) {
+                localStorage.removeItem('savedScriptContent');
+                displayResults(sampleText);
+                document.getElementById('suggestions-content').innerHTML = '';
+            }
+        }
         
         function handleFontUpload(event) {
             const file = event.target.files[0];
@@ -569,7 +678,7 @@
             document.getElementById('suggestions-panel').classList.toggle('hidden');
         }
 
-        function analyzeFile() {
+        function handleFileUpload() {
             const file = document.getElementById('fileInput').files[0];
             if (!file) return;
             const scriptContent = document.getElementById('script-content');
@@ -582,44 +691,157 @@
                 reader.onload = (e) => {
                     mammoth.convertToHtml({ arrayBuffer: e.target.result })
                         .then(result => {
-                           sendTextForAnalysis(result.value, true);
+                           displayResults(result.value);
                         })
                         .catch(handleError);
                 };
                 reader.readAsArrayBuffer(file);
             } else {
-                reader.onload = (e) => sendTextForAnalysis(e.target.result, false);
+                reader.onload = (e) => {
+                    const html = '<p>' + e.target.result.replace(/\n\s*\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+                    displayResults(html);
+                }
                 reader.readAsText(file, 'UTF-8');
             }
             reader.onerror = handleError;
         }
         
-        async function sendTextForAnalysis(content, isHtml) {
+        function getPerformanceNotes() {
+            const scriptContent = document.getElementById('script-content');
+            const text = scriptContent.innerText;
+            if (text.trim() === "") {
+                alert("Please upload a script first.");
+                return;
+            }
+            sendTextForAnalysis(text);
+        }
+
+        async function sendTextForAnalysis(text) {
             const progressContainer = document.getElementById('progress-container');
             const scriptContent = document.getElementById('script-content');
+            const suggestionsContent = document.getElementById('suggestions-content');
+            
             progressContainer.style.display = 'block';
-            scriptContent.innerHTML = "Processing script...";
-        
+            scriptContent.innerHTML = "Analyzing script with AI... This can take a moment for longer texts. 🤖";
+            suggestionsContent.innerHTML = ''; 
+
+            const creativity = document.getElementById('creativity-select').value;
+            const style = document.getElementById('style-select').value;
+            const description = document.getElementById('book-description').value;
+
             try {
-                await new Promise(resolve => setTimeout(resolve, 500)); 
-                let finalHtml = content;
-                if (!isHtml) {
-                    finalHtml = '<p>' + content.replace(/\n\s*\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        creativity_level: creativity,
+                        narrator_style: style,
+                        book_description: description
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `Server error: ${response.status}`);
                 }
-                displayResults(finalHtml);
+
+                const analysisResult = await response.json();
+                renderAnalysisResults(analysisResult);
+
             } catch (error) {
-                scriptContent.innerHTML = `An error occurred: ${error.message}.`;
-                displayResults(sampleAnalysis[0].text);
+                console.error("Analysis Error:", error);
+                scriptContent.innerHTML = `<p style="color: var(--emphasize-color);">An error occurred: ${error.message}. Please check the console or try again.</p>`;
             } finally {
                 progressContainer.style.display = 'none';
             }
         }
+        
+        function renderAnalysisResults(analysisData) {
+            const scriptContent = document.getElementById('script-content');
+            const suggestionsContent = document.getElementById('suggestions-content');
+            let scriptHtml = '';
+            let suggestionsHtml = '';
 
+            const escapeHtml = (unsafe) => {
+                return unsafe
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+            };
+
+            analysisData.forEach((item, index) => {
+                const icon = annotationMap[item.type]?.icon || '';
+                const formattedText = escapeHtml(item.text).replace(/\n/g, '<br>');
+
+                scriptHtml += `<span id="script-part-${index}" class="narration-text ${item.type}" data-suggestion-id="suggestion-${index}">` +
+                              `<span class="narration-icon">${icon}</span>` +
+                              `${formattedText}` +
+                              `</span>`;
+
+                if (item.type !== 'normal' && item.feedback) {
+                    suggestionsHtml += `
+                        <div class="suggestion-item" id="suggestion-${index}" data-script-id="script-part-${index}">
+                            <strong>${annotationMap[item.type]?.label || item.type} ${item.emotion_emoji || ''}</strong>
+                            <p>${escapeHtml(item.feedback)}</p>
+                        </div>
+                    `;
+                }
+            });
+
+            scriptContent.innerHTML = scriptHtml;
+            suggestionsContent.innerHTML = suggestionsHtml;
+            addInteractivityListeners();
+            saveScriptState();
+        }
+
+        function addInteractivityListeners() {
+            document.querySelectorAll('.suggestion-item').forEach(item => {
+                const scriptId = item.dataset.scriptId;
+                const scriptEl = document.getElementById(scriptId);
+                
+                item.addEventListener('mouseenter', () => {
+                    scriptEl?.classList.add('highlight');
+                    item.classList.add('highlight');
+                });
+                
+                item.addEventListener('mouseleave', () => {
+                    scriptEl?.classList.remove('highlight');
+                    item.classList.remove('highlight');
+                });
+
+                item.addEventListener('click', () => {
+                     scriptEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                });
+            });
+
+            document.querySelectorAll('.narration-text[data-suggestion-id]').forEach(item => {
+                const suggestionId = item.dataset.suggestionId;
+                const suggestionEl = document.getElementById(suggestionId);
+                
+                item.addEventListener('mouseenter', () => {
+                    suggestionEl?.classList.add('highlight');
+                    item.classList.add('highlight');
+                    if (suggestionEl) {
+                        suggestionEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                });
+                
+                item.addEventListener('mouseleave', () => {
+                    suggestionEl?.classList.remove('highlight');
+                    item.classList.remove('highlight');
+                });
+            });
+        }
+        
         function displayResults(htmlContent) {
             const scriptContent = document.getElementById('script-content');
             scriptContent.innerHTML = htmlContent;
             document.getElementById('suggestions-content').innerHTML = '';
             setupAnnotationEditing();
+            saveScriptState();
         }
 
         function setupAnnotationEditing() {
@@ -640,14 +862,14 @@
                 const anno = annotationMap[typeKey];
                 const menuItem = document.createElement('div');
                 menuItem.classList.add('menu-item');
-                menuItem.textContent = `${anno.emoji} ${anno.label}`;
+                const displayEmoji = anno.emoji || anno.icon || '';
+                menuItem.textContent = `${displayEmoji} ${anno.label}`;
                 menuItem.onclick = () => {
                     applyAnnotationToSelection(typeKey);
                     menu.style.display = 'none';
                 };
                 menu.appendChild(menuItem);
             });
-            // Position menu relative to the script panel to avoid scrolling issues
             const scriptPanel = document.querySelector('.script-panel');
             const rect = scriptPanel.getBoundingClientRect();
             menu.style.left = `${event.clientX - rect.left}px`;
@@ -660,18 +882,110 @@
             const selectedText = lastSelection.toString();
             if (!selectedText) return;
 
-            // This is a simplified annotation. A real implementation would need to handle
-            // selections that cross HTML element boundaries more robustly.
             const span = document.createElement('span');
             span.className = 'narration-text ' + newType;
             try {
                 lastSelection.surroundContents(span);
             } catch (e) {
                 console.warn("Could not apply annotation across complex selection.", e);
+                const range = lastSelection.cloneRange();
+                range.deleteContents();
+                range.insertNode(span);
+                span.textContent = selectedText;
             }
             
             window.getSelection().removeAllRanges();
             lastSelection = null;
+            saveScriptState();
+        }
+
+        function wrapWordsInSpans(element) {
+            if (!element) return;
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
+            const textNodes = [];
+            while(walker.nextNode()) {
+                if (walker.currentNode.textContent.trim().length > 0) {
+                    textNodes.push(walker.currentNode);
+                }
+            }
+
+            textNodes.forEach(node => {
+                const words = node.textContent.split(/(\s+)/);
+                const fragment = document.createDocumentFragment();
+                words.forEach(word => {
+                    if (word.trim().length > 0) {
+                        const span = document.createElement('span');
+                        span.textContent = word;
+                        span.className = 'teleprompter-word';
+                        fragment.appendChild(span);
+                    } else {
+                        fragment.appendChild(document.createTextNode(word));
+                    }
+                });
+                node.parentNode.replaceChild(fragment, node);
+            });
+        }
+        
+        function handleTeleprompterWordClick(event) {
+            if (!event.target.classList.contains('teleprompter-word')) return;
+
+            const wasScrolling = isTeleprompterScrolling;
+            if (wasScrolling) {
+                cancelAnimationFrame(scrollAnimationId);
+                scrollAnimationId = null;
+                if (resumeScrollTimer) clearTimeout(resumeScrollTimer);
+            }
+            
+            if (highlightClearTimer) {
+                clearTimeout(highlightClearTimer);
+            }
+
+            const clickedWordSpan = event.target;
+            const teleprompterContent = document.getElementById('teleprompter-content');
+
+            teleprompterContent.querySelectorAll('.mistake-word, .sentence-start').forEach(el => {
+                el.classList.remove('mistake-word', 'sentence-start');
+            });
+
+            clickedWordSpan.classList.add('mistake-word');
+
+            let phraseStartSpan = null;
+            let currentSpan = clickedWordSpan;
+            while (currentSpan && currentSpan.previousElementSibling) {
+                currentSpan = currentSpan.previousElementSibling;
+                const text = currentSpan.textContent.trim();
+                if (text.includes(',') || text.endsWith('.') || text.endsWith('!') || text.endsWith('?')) {
+                    phraseStartSpan = currentSpan.nextElementSibling;
+                    break;
+                }
+            }
+            if (!phraseStartSpan) {
+                let parentBlock = clickedWordSpan.closest('p, h1, h4');
+                if (parentBlock) {
+                    phraseStartSpan = parentBlock.querySelector('.teleprompter-word');
+                }
+            }
+            
+            if (phraseStartSpan) {
+                phraseStartSpan.classList.add('sentence-start');
+                phraseStartSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            
+            highlightClearTimer = setTimeout(() => {
+                clickedWordSpan.classList.remove('mistake-word');
+                if (phraseStartSpan) {
+                    phraseStartSpan.classList.remove('sentence-start');
+                }
+            }, 5000);
+            
+            if (wasScrolling) {
+                resumeScrollTimer = setTimeout(() => {
+                    resumeScrollTimer = null;
+                    if (document.getElementById('teleprompter-overlay').style.display === 'flex' && isTeleprompterScrolling) {
+                       startAutoscroll();
+                    }
+                }, 2500);
+            }
         }
         
         function startTeleprompter() {
@@ -682,8 +996,15 @@
             }
             const teleprompterContent = document.getElementById('teleprompter-content');
             const teleprompterOverlay = document.getElementById('teleprompter-overlay');
+            const wrapper = document.getElementById('teleprompter-content-wrapper');
             
-            teleprompterContent.innerHTML = mainScriptContent.innerHTML; 
+            wrapper.style.padding = `5vh ${teleprompterMargin}vw`;
+            
+            const clonedContent = mainScriptContent.cloneNode(true);
+            wrapWordsInSpans(clonedContent);
+            teleprompterContent.innerHTML = clonedContent.innerHTML; 
+            teleprompterContent.addEventListener('click', handleTeleprompterWordClick);
+
             teleprompterOverlay.style.display = 'flex';
             document.body.style.overflow = 'hidden';
 
@@ -697,9 +1018,27 @@
             const teleprompterOverlay = document.getElementById('teleprompter-overlay');
             const wrapper = document.getElementById('teleprompter-content-wrapper');
             if (isTeleprompterScrolling) toggleAutoscroll();
+
+            if (resumeScrollTimer) {
+                clearTimeout(resumeScrollTimer);
+                resumeScrollTimer = null;
+            }
+            isDecelerating = false;
+
             teleprompterOverlay.style.display = 'none';
             document.body.style.overflow = 'auto';
             wrapper.scrollTop = 0;
+            
+            const teleprompterContent = document.getElementById('teleprompter-content');
+            teleprompterContent.querySelectorAll('.mistake-word, .sentence-start').forEach(el => {
+                el.classList.remove('mistake-word', 'sentence-start');
+            });
+            teleprompterContent.removeEventListener('click', handleTeleprompterWordClick);
+        }
+
+        function changeTeleprompterMargin(amount) {
+            teleprompterMargin = Math.max(0, Math.min(45, teleprompterMargin + amount));
+            document.getElementById('teleprompter-content-wrapper').style.padding = `5vh ${teleprompterMargin}vw`;
         }
 
         function changeTeleprompterFontSize(amount) {
@@ -717,6 +1056,12 @@
         }
 
         function toggleAutoscroll() {
+            if (resumeScrollTimer) {
+                clearTimeout(resumeScrollTimer);
+                resumeScrollTimer = null;
+            }
+            isDecelerating = false;
+
             isTeleprompterScrolling = !isTeleprompterScrolling;
             const toggleButton = document.getElementById('teleprompter-scroll-toggle');
             if (isTeleprompterScrolling) {
@@ -727,61 +1072,82 @@
                 toggleButton.textContent = '▶️ Start Scroll';
                 toggleButton.classList.remove('active');
                 cancelAnimationFrame(scrollAnimationId);
+                scrollAnimationId = null;
+                currentScrollSpeed = 0;
+                scrollAccumulator = 0;
             }
         }
         
         function startAutoscroll() {
             const wrapper = document.getElementById('teleprompter-content-wrapper');
             const content = document.getElementById('teleprompter-content');
-            const wpm = parseInt(document.getElementById('wpm-slider').value, 10);
-            
-            const totalWords = content.innerText.trim().split(/\s+/).filter(word => word.length > 0).length;
-            if (totalWords === 0) { 
-                if (isTeleprompterScrolling) toggleAutoscroll();
-                return;
-            }
 
-            const totalMinutes = totalWords / wpm;
-            const totalDurationSeconds = totalMinutes * 60;
+            const BASE_SPEED = 35;
+            const speedMultiplier = parseFloat(document.getElementById('speed-select').value);
+            currentScrollSpeed = BASE_SPEED * speedMultiplier;
+
             const scrollableHeight = wrapper.scrollHeight - wrapper.clientHeight;
-
             if (scrollableHeight <= 0 || wrapper.scrollTop >= scrollableHeight) {
                 if (isTeleprompterScrolling) toggleAutoscroll();
                 return;
             }
-            
-            const remainingScroll = scrollableHeight - wrapper.scrollTop;
-            const scrollPercentage = wrapper.scrollTop / scrollableHeight;
-            const elapsedTimeSeconds = totalDurationSeconds * scrollPercentage;
-            const remainingTimeSeconds = totalDurationSeconds - elapsedTimeSeconds;
-            
-            const pixelsPerSecond = (remainingTimeSeconds > 0) 
-                ? remainingScroll / remainingTimeSeconds
-                : scrollableHeight / totalDurationSeconds;
 
-            let lastTimestamp = performance.now();
-            
-            function scrollStep(timestamp) {
-                if (!isTeleprompterScrolling) return;
-
-                const deltaTime = timestamp - lastTimestamp;
-                lastTimestamp = timestamp;
-
-                const scrollAmount = (pixelsPerSecond * deltaTime) / 1000;
-                wrapper.scrollTop += scrollAmount;
-
-                if (wrapper.scrollTop >= scrollableHeight) {
-                    wrapper.scrollTop = scrollableHeight;
-                    if (isTeleprompterScrolling) toggleAutoscroll();
-                    return;
-                }
+            if (!scrollAnimationId) {
+                let lastTimestamp = performance.now();
+                scrollAccumulator = 0;
                 
+                function scrollStep(timestamp) {
+                    if (!isTeleprompterScrolling && !isDecelerating) {
+                        scrollAnimationId = null;
+                        return;
+                    }
+
+                    const deltaTime = timestamp - lastTimestamp;
+                    lastTimestamp = timestamp;
+
+                    if (isDecelerating) {
+                        const elapsed = timestamp - decelerationStartTime;
+                        if (elapsed >= DECELERATION_DURATION) {
+                            currentScrollSpeed = 0;
+                            isDecelerating = false;
+                            
+                            resumeScrollTimer = setTimeout(() => {
+                                resumeScrollTimer = null;
+                                if (document.getElementById('teleprompter-overlay').style.display === 'flex') {
+                                   isTeleprompterScrolling = true;
+                                   startAutoscroll(); 
+                                }
+                            }, POST_STOP_PAUSE);
+
+                            scrollAnimationId = null;
+                            return; 
+                        }
+                        const progress = elapsed / DECELERATION_DURATION;
+                        currentScrollSpeed = initialSpeedOnDecelerate * (1 - progress);
+                    }
+
+                    const scrollAmount = (currentScrollSpeed * deltaTime) / 1000;
+                    scrollAccumulator += scrollAmount;
+
+                    if (scrollAccumulator >= 1) {
+                        const pixelsToScroll = Math.floor(scrollAccumulator);
+                        wrapper.scrollTop += pixelsToScroll;
+                        scrollAccumulator -= pixelsToScroll;
+                    }
+
+                    if (wrapper.scrollTop >= scrollableHeight) {
+                        wrapper.scrollTop = scrollableHeight;
+                        if (isTeleprompterScrolling) toggleAutoscroll();
+                        scrollAnimationId = null;
+                        return;
+                    }
+                    
+                    scrollAnimationId = requestAnimationFrame(scrollStep);
+                }
+
                 scrollAnimationId = requestAnimationFrame(scrollStep);
             }
-
-            scrollAnimationId = requestAnimationFrame(scrollStep);
         }
     </script>
 </body>
 </html>
-
