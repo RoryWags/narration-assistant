@@ -28,6 +28,10 @@
             --pause-color: #F6AD55;
             --font-main: 'Poppins', sans-serif;
             --script-font: var(--font-main);
+            --search-highlight-bg: #f6ad55;
+            --search-highlight-text: #1A202C;
+            --current-search-highlight-bg: #E53E3E;
+            --current-search-highlight-text: white;
         }
         body.light-mode {
             --bg-dark-gradient: linear-gradient(to top, #fffdd5 0%, #faf8e8 100%);
@@ -41,6 +45,9 @@
             --accent-secondary: #4299e133;
             --highlight-bg: #4299e133;
             --whisper-color: #718096;
+            --search-highlight-bg: #4299E1;
+            --search-highlight-text: white;
+            --current-search-highlight-bg: #c53030;
         }
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -229,14 +236,27 @@
             color: var(--text-primary);
         }
         #teleprompter-controls {
-            padding: 15px 20px;
+            padding: 10px 15px;
             background-color: rgba(0,0,0,0.2);
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 20px;
+            gap: 15px;
             flex-shrink: 0;
             border-top: 1px solid var(--border-color);
+            flex-wrap: wrap;
+            position: relative; /* MODIFIED: Added for positioning context */
+        }
+        /* --- NEW: Page number display --- */
+        #page-number-display {
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            pointer-events: none;
         }
         #teleprompter-controls .control-group {
             display: flex;
@@ -251,7 +271,7 @@
         #teleprompter-controls input[type="range"] {
             width: 120px;
         }
-        #teleprompter-controls button {
+        #teleprompter-controls button, #teleprompter-controls .search-button {
             background: var(--accent-secondary);
             border: 1px solid var(--border-color);
             color: var(--text-primary);
@@ -287,14 +307,32 @@
             transition: background-color 0.3s ease;
         }
         .teleprompter-word.mistake-word {
-            background-color: rgba(229, 62, 62, 0.6); /* Red for mistake */
+            background-color: rgba(229, 62, 62, 0.6);
         }
         .teleprompter-word.sentence-start {
-            background-color: rgba(72, 187, 120, 0.6); /* Green for start */
+            background-color: rgba(72, 187, 120, 0.6);
         }
         #teleprompter-overlay.focus-enabled #teleprompter-content-wrapper {
             -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 70%, transparent 100%);
             mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 70%, transparent 100%);
+        }
+        /* --- MODIFIED: Search Styling now targets spans with classes instead of <mark> tags --- */
+        .teleprompter-word.search-highlight {
+            background-color: var(--search-highlight-bg);
+            color: var(--search-highlight-text);
+            border-radius: 3px;
+        }
+        .teleprompter-word.current-search-highlight {
+            background-color: var(--current-search-highlight-bg);
+            color: var(--current-search-highlight-text);
+            box-shadow: 0 0 8px var(--current-search-highlight-bg);
+        }
+        #search-match-counter {
+            min-width: 60px;
+            text-align: center;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            font-weight: 500;
         }
     </style>
 </head>
@@ -390,7 +428,7 @@
                 </div>
             </div>
             
-            <button class="action-button teleprompter-button" onclick="startTeleprompter()">🖥️ Teleprompter Mode</button>
+            <button class="action-button teleprompter-button" onclick="startTeleprompter()">🖥️ Teleprompter Mode (9)</button>
             <button class="action-button focus-button" onclick="toggleFocusMode()">Focus Mode</button>
             <button class="action-button theme-button" id="theme-toggle" onclick="toggleTheme()">Toggle Theme</button>
             <button class="action-button toggle-button" onclick="toggleSuggestions()">Toggle Suggestions</button>
@@ -413,21 +451,21 @@
             <div id="teleprompter-content"></div>
         </div>
         <div id="teleprompter-controls">
-            <div class="control-group">
-                <button id="teleprompter-scroll-toggle">▶️ Start Scroll</button>
+            <span id="page-number-display"></span> <div class="control-group">
+                <button id="teleprompter-scroll-toggle">▶️ Start</button>
             </div>
             <div class="control-group">
                 <label for="speed-select">Speed:</label>
                 <select id="speed-select" class="control-select">
-                    <option value="0.25">Very Slow</option>
+                    <option value="0.25">Slower</option>
                     <option value="0.5">Slow</option>
                     <option value="1" selected>Normal</option>
                     <option value="1.5">Fast</option>
-                    <option value="2">Very Fast</option>
+                    <option value="2">Faster</option>
                 </select>
             </div>
             <div class="control-group">
-                <label>Font Size:</label>
+                <label>Font:</label>
                 <button onclick="changeTeleprompterFontSize(-0.2)">-</button>
                 <button onclick="changeTeleprompterFontSize(0.2)">+</button>
             </div>
@@ -438,6 +476,12 @@
                 <label>Margin:</label>
                 <button onclick="changeTeleprompterMargin(-1)">-</button>
                 <button onclick="changeTeleprompterMargin(1)">+</button>
+            </div>
+            <div class="control-group">
+                <input type="text" id="teleprompter-search-input" class="control-select" placeholder="Find in script..." style="width: 160px;">
+                <button id="search-prev-btn">↑ Prev</button>
+                <button id="search-next-btn">Next ↓</button>
+                <span id="search-match-counter"></span>
             </div>
              <div class="control-group">
                 <button onclick="stopTeleprompter()">❌ Close</button>
@@ -459,15 +503,17 @@
         let highlightClearTimer = null;
         let scrollAccumulator = 0;
         
-        // --- Teleprompter State Variables ---
-        let currentScrollSpeed = 0; // pixels per second
+        let currentScrollSpeed = 0;
         let isDecelerating = false;
         let decelerationStartTime = 0;
         let initialSpeedOnDecelerate = 0;
         let resumeScrollTimer = null;
-        const DECELERATION_DURATION = 1500; // ms
-        const POST_STOP_PAUSE = 1000; // ms
-
+        const DECELERATION_DURATION = 1500;
+        const POST_STOP_PAUSE = 1000;
+        
+        // --- MODIFIED: Search state now holds arrays of span elements ---
+        let searchResults = [];
+        let currentSearchIndex = -1;
 
         const annotationMap = {
             'speed-up':    { label: 'Speed Up',        icon: '⚡️', emoji: '⚡️' },
@@ -494,14 +540,22 @@
             
             document.addEventListener('keydown', (event) => { 
                 const isTeleprompterActive = document.getElementById('teleprompter-overlay').style.display === 'flex';
+                // --- MODIFIED: General check for any input focus to prevent hotkey conflicts ---
+                const isInputFocused = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
 
                 if (event.key === 'Escape') {
                     if (document.body.classList.contains('focus-active')) toggleFocusMode();
                     if (isTeleprompterActive) stopTeleprompter();
                     return;
                 }
+                
+                // --- NEW: Teleprompter hotkey ---
+                if (event.key === '9' && !isInputFocused && !isTeleprompterActive) {
+                    event.preventDefault();
+                    startTeleprompter();
+                }
 
-                if (isTeleprompterActive) {
+                if (isTeleprompterActive && !isInputFocused) { // MODIFIED to use general focus check
                     if (event.key === ' ' || event.code === 'Space') {
                         event.preventDefault();
                         toggleAutoscroll();
@@ -524,20 +578,15 @@
                         }
                     }
 
-                    // <<< NEW FEATURE: ARROWDOWN HOTKEY >>>
                     if (event.key === 'ArrowDown') {
                         event.preventDefault();
                         const wrapper = document.getElementById('teleprompter-content-wrapper');
                         const content = document.getElementById('teleprompter-content');
                         const blocks = Array.from(content.querySelectorAll('p, h1, h4'));
                         const currentScrollTop = wrapper.scrollTop;
-
-                        // Find the first block that is below the current viewport top.
-                        // Add a small offset (1px) to avoid finding the current block if it's perfectly at the top.
                         const nextBlock = blocks.find(block => block.offsetTop > currentScrollTop + 1);
                         
                         if (nextBlock) {
-                            // Scroll the next block to the top of the viewport
                             nextBlock.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }
                     }
@@ -577,7 +626,90 @@
             document.getElementById('teleprompter-scroll-toggle').addEventListener('click', toggleAutoscroll);
             document.getElementById('teleprompter-focus-toggle').addEventListener('click', toggleTeleprompterFocus);
             document.getElementById('font-upload-input').addEventListener('change', handleFontUpload);
+
+            const searchInput = document.getElementById('teleprompter-search-input');
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('search-next-btn').click();
+                }
+            });
+            searchInput.addEventListener('input', searchTeleprompter);
+            document.getElementById('search-next-btn').addEventListener('click', () => navigateSearchResults(1));
+            document.getElementById('search-prev-btn').addEventListener('click', () => navigateSearchResults(-1));
         });
+
+        // --- NEW: Rewritten search logic for phrases ---
+        function clearTeleprompterSearch() {
+            const content = document.getElementById('teleprompter-content');
+            content.querySelectorAll('.search-highlight, .current-search-highlight').forEach(el => {
+                el.classList.remove('search-highlight', 'current-search-highlight');
+            });
+            searchResults = [];
+            currentSearchIndex = -1;
+            updateSearchCounter();
+        }
+
+        function searchTeleprompter() {
+            if (isTeleprompterScrolling) toggleAutoscroll();
+            clearTeleprompterSearch();
+            const searchTerm = document.getElementById('teleprompter-search-input').value.trim();
+            if (!searchTerm) return;
+
+            const content = document.getElementById('teleprompter-content');
+            const allWordSpans = Array.from(content.querySelectorAll('.teleprompter-word'));
+            const searchWords = searchTerm.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+            const numSearchWords = searchWords.length;
+            if (numSearchWords === 0) return;
+
+            for (let i = 0; i <= allWordSpans.length - numSearchWords; i++) {
+                const potentialMatchSpans = allWordSpans.slice(i, i + numSearchWords);
+                const potentialMatchText = potentialMatchSpans.map(span => span.textContent).join(' ');
+
+                if (potentialMatchText.toLowerCase().startsWith(searchTerm.toLowerCase())) {
+                    searchResults.push(potentialMatchSpans);
+                    potentialMatchSpans.forEach(span => span.classList.add('search-highlight'));
+                    i += numSearchWords - 1;
+                }
+            }
+            if (searchResults.length > 0) {
+                currentSearchIndex = 0;
+                navigateSearchResults(0);
+            }
+            updateSearchCounter();
+        }
+        
+        function navigateSearchResults(direction) {
+            if (searchResults.length === 0) return;
+
+            if (currentSearchIndex >= 0) {
+                searchResults[currentSearchIndex].forEach(span => span.classList.remove('current-search-highlight'));
+            }
+
+            currentSearchIndex += direction;
+
+            if (currentSearchIndex >= searchResults.length) currentSearchIndex = 0;
+            if (currentSearchIndex < 0) currentSearchIndex = searchResults.length - 1;
+
+            const currentMatchSpans = searchResults[currentSearchIndex];
+            currentMatchSpans.forEach(span => span.classList.add('current-search-highlight'));
+            currentMatchSpans[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            updateSearchCounter();
+        }
+        
+        function updateSearchCounter() {
+            const counter = document.getElementById('search-match-counter');
+            const input = document.getElementById('teleprompter-search-input');
+            if (searchResults.length > 0) {
+                counter.textContent = `${currentSearchIndex + 1} of ${searchResults.length}`;
+                input.style.boxShadow = 'none';
+            } else {
+                counter.textContent = input.value ? '0 of 0' : '';
+                if(input.value) input.style.boxShadow = '0 0 5px 1px var(--emphasize-color)';
+            }
+        }
+        // --- END of new search functions ---
 
         function saveScriptState() {
             const scriptHtml = document.getElementById('script-content').innerHTML;
@@ -988,6 +1120,29 @@
             }
         }
         
+        // --- NEW: Function to calculate and update page number ---
+        function updatePageNumber() {
+            const wrapper = document.getElementById('teleprompter-content-wrapper');
+            const display = document.getElementById('page-number-display');
+            if (!wrapper || !display) return;
+
+            const scrollHeight = wrapper.scrollHeight;
+            const clientHeight = wrapper.clientHeight;
+
+            if (clientHeight <= 0) {
+                display.textContent = '';
+                return;
+            }
+
+            // The focus zone is the vertical center of the viewport
+            const focusZonePosition = wrapper.scrollTop + (clientHeight / 2);
+            
+            const currentPage = Math.floor(focusZonePosition / clientHeight) + 1;
+            const totalPages = Math.max(1, Math.ceil(scrollHeight / clientHeight));
+
+            display.textContent = `Page ${currentPage} of ${totalPages}`;
+        }
+
         function startTeleprompter() {
             const mainScriptContent = document.getElementById('script-content');
             if (mainScriptContent.innerText.trim() === "") {
@@ -1005,6 +1160,8 @@
             teleprompterContent.innerHTML = clonedContent.innerHTML; 
             teleprompterContent.addEventListener('click', handleTeleprompterWordClick);
 
+            wrapper.addEventListener('scroll', updatePageNumber); // MODIFIED: Add listener
+
             teleprompterOverlay.style.display = 'flex';
             document.body.style.overflow = 'hidden';
 
@@ -1012,6 +1169,8 @@
             document.getElementById('teleprompter-focus-toggle').textContent = 'Focus: ON';
             document.getElementById('teleprompter-focus-toggle').classList.add('active');
             document.getElementById('teleprompter-content').style.fontSize = `${teleprompterFontSize}rem`;
+
+            setTimeout(updatePageNumber, 50); // MODIFIED: Initial calculation
         }
 
         function stopTeleprompter() {
@@ -1034,16 +1193,23 @@
                 el.classList.remove('mistake-word', 'sentence-start');
             });
             teleprompterContent.removeEventListener('click', handleTeleprompterWordClick);
+            
+            wrapper.removeEventListener('scroll', updatePageNumber); // MODIFIED: Remove listener
+
+            document.getElementById('teleprompter-search-input').value = '';
+            clearTeleprompterSearch();
         }
 
         function changeTeleprompterMargin(amount) {
             teleprompterMargin = Math.max(0, Math.min(45, teleprompterMargin + amount));
             document.getElementById('teleprompter-content-wrapper').style.padding = `5vh ${teleprompterMargin}vw`;
+            updatePageNumber(); // MODIFIED: Update on change
         }
 
         function changeTeleprompterFontSize(amount) {
             teleprompterFontSize = Math.max(1, Math.min(8, teleprompterFontSize + amount));
             document.getElementById('teleprompter-content').style.fontSize = `${teleprompterFontSize}rem`;
+            updatePageNumber(); // MODIFIED: Update on change
         }
         
         function toggleTeleprompterFocus() {
@@ -1065,11 +1231,11 @@
             isTeleprompterScrolling = !isTeleprompterScrolling;
             const toggleButton = document.getElementById('teleprompter-scroll-toggle');
             if (isTeleprompterScrolling) {
-                toggleButton.textContent = '⏸️ Pause Scroll';
+                toggleButton.textContent = '⏸️ Pause';
                 toggleButton.classList.add('active');
                 startAutoscroll();
             } else {
-                toggleButton.textContent = '▶️ Start Scroll';
+                toggleButton.textContent = '▶️ Start';
                 toggleButton.classList.remove('active');
                 cancelAnimationFrame(scrollAnimationId);
                 scrollAnimationId = null;
