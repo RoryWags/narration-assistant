@@ -245,18 +245,13 @@
             flex-shrink: 0;
             border-top: 1px solid var(--border-color);
             flex-wrap: wrap;
-            position: relative; /* MODIFIED: Added for positioning context */
         }
-        /* --- NEW: Page number display --- */
         #page-number-display {
-            position: absolute;
-            left: 20px;
-            top: 50%;
-            transform: translateY(-50%);
             font-size: 0.9rem;
             font-weight: 500;
             color: var(--text-secondary);
-            pointer-events: none;
+            white-space: nowrap;
+            margin-right: 10px;
         }
         #teleprompter-controls .control-group {
             display: flex;
@@ -316,7 +311,6 @@
             -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 70%, transparent 100%);
             mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 70%, transparent 100%);
         }
-        /* --- MODIFIED: Search Styling now targets spans with classes instead of <mark> tags --- */
         .teleprompter-word.search-highlight {
             background-color: var(--search-highlight-bg);
             color: var(--search-highlight-text);
@@ -333,6 +327,90 @@
             font-size: 0.9rem;
             color: var(--text-secondary);
             font-weight: 500;
+        }
+
+        /* --- NEW: Controls Modal Styles --- */
+        .open-controls-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1001; /* Above most content, below teleprompter */
+            padding: 12px 20px;
+            font-size: 1rem;
+            display: block;
+            border-radius: 12px;
+            background: var(--accent-secondary);
+            color: var(--text-primary);
+        }
+
+        body.focus-active .open-controls-button,
+        body.focus-active .exit-focus-button {
+            display: none;
+        }
+
+        .controls-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            z-index: 1900; /* Below teleprompter, above everything else */
+            display: none; /* Hidden by default */
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+
+        .controls-modal-content {
+            position: relative;
+            padding: 30px;
+            width: 90%;
+            max-width: 500px;
+        }
+
+        .controls-modal-content h3 {
+            text-align: center;
+            font-size: 1.5rem;
+            margin-bottom: 25px;
+            color: var(--text-primary);
+        }
+
+        .modal-buttons-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .modal-buttons-grid .action-button, .modal-buttons-grid .upload-section {
+            padding: 15px;
+            font-size: 1rem;
+            margin: 0; /* Override any potential margins */
+        }
+
+        .close-modal-btn {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 2.5rem;
+            line-height: 1;
+            cursor: pointer;
+            transition: transform 0.2s ease, color 0.2s ease;
+        }
+
+        .close-modal-btn:hover {
+            color: var(--text-primary);
+            transform: rotate(90deg);
+        }
+
+        @media (max-width: 600px) {
+            .modal-buttons-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -427,23 +505,10 @@
                     <textarea id="book-description" class="control-textarea" placeholder="Paste the book's back cover description here to tailor the AI's suggestions to its specific tone and message..."></textarea>
                 </div>
             </div>
-            
-            <button class="action-button teleprompter-button" onclick="startTeleprompter()">🖥️ Teleprompter Mode (9)</button>
-            <button class="action-button focus-button" onclick="toggleFocusMode()">Focus Mode</button>
-            <button class="action-button theme-button" id="theme-toggle" onclick="toggleTheme()">Toggle Theme</button>
-            <button class="action-button toggle-button" onclick="toggleSuggestions()">Toggle Suggestions</button>
-            <button class="action-button performance-notes-button" onclick="getPerformanceNotes()">✨ Get Performance Notes</button>
-            
-            <button class="action-button focus-button" onclick="clearAndResetScript()" style="background-color: var(--emphasize-color);">🔄 Clear & Reset Script</button>
-
-            <div class="action-button upload-button upload-section" onclick="document.getElementById('fileInput').click();">
-                <input type="file" id="fileInput" onchange="handleFileUpload()" accept=".txt,.docx">
-                <label>Upload New Script</label>
-            </div>
         </aside>
     </div>
 
-    <button class="action-button exit-focus-button" id="exit-focus-button" onclick="toggleFocusMode()">Exit Focus Mode</button>
+    <button class="action-button exit-focus-button" id="exit-focus-button" onclick="toggleFocusMode()" style="top: 80px; right: 20px;">Exit Focus</button>
     <div id="annotation-menu" class="annotation-menu"></div>
 
     <div id="teleprompter-overlay">
@@ -451,7 +516,12 @@
             <div id="teleprompter-content"></div>
         </div>
         <div id="teleprompter-controls">
-            <span id="page-number-display"></span> <div class="control-group">
+            <div class="control-group">
+                <span id="page-number-display"></span>
+                <input type="number" id="page-input" class="control-select" style="width: 70px;" placeholder="Page">
+                <button id="go-to-page-btn">Go</button>
+            </div>
+             <div class="control-group">
                 <button id="teleprompter-scroll-toggle">▶️ Start</button>
             </div>
             <div class="control-group">
@@ -484,11 +554,34 @@
                 <span id="search-match-counter"></span>
             </div>
              <div class="control-group">
+                <button id="teleprompter-theme-toggle">🌓 Theme</button>
+            </div>
+             <div class="control-group">
                 <button onclick="stopTeleprompter()">❌ Close</button>
             </div>
         </div>
     </div>
 
+    <button class="action-button open-controls-button" id="open-controls-btn">⚙️ Controls</button>
+
+    <div id="controls-modal" class="controls-modal-overlay">
+        <div class="controls-modal-content panel">
+            <button class="close-modal-btn" id="close-modal-btn">&times;</button>
+            <h3>Actions</h3>
+            <div class="modal-buttons-grid">
+                <button class="action-button teleprompter-button" onclick="startTeleprompter()">🖥️ Teleprompter Mode (9)</button>
+                <button class="action-button focus-button" onclick="toggleFocusMode()">Focus Mode</button>
+                <button class="action-button theme-button" id="theme-toggle" onclick="toggleTheme()">Toggle Theme</button>
+                <button class="action-button toggle-button" onclick="toggleSuggestions()">Toggle Suggestions</button>
+                <button class="action-button performance-notes-button" onclick="getPerformanceNotes()">✨ Get Performance Notes</button>
+                <button class="action-button" onclick="clearAndResetScript()" style="background-color: var(--emphasize-color);">🔄 Clear & Reset Script</button>
+                <div class="action-button upload-button upload-section" onclick="document.getElementById('fileInput').click();">
+                    <input type="file" id="fileInput" onchange="handleFileUpload()" accept=".txt,.docx">
+                    <label>Upload New Script</label>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script>
         let scriptFontSize = 1.3;
@@ -511,7 +604,6 @@
         const DECELERATION_DURATION = 1500;
         const POST_STOP_PAUSE = 1000;
         
-        // --- MODIFIED: Search state now holds arrays of span elements ---
         let searchResults = [];
         let currentSearchIndex = -1;
 
@@ -540,22 +632,22 @@
             
             document.addEventListener('keydown', (event) => { 
                 const isTeleprompterActive = document.getElementById('teleprompter-overlay').style.display === 'flex';
-                // --- MODIFIED: General check for any input focus to prevent hotkey conflicts ---
                 const isInputFocused = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
+                const isModalOpen = document.getElementById('controls-modal').style.display === 'flex';
 
                 if (event.key === 'Escape') {
+                    if (isModalOpen) hideControlsModal();
                     if (document.body.classList.contains('focus-active')) toggleFocusMode();
                     if (isTeleprompterActive) stopTeleprompter();
                     return;
                 }
                 
-                // --- NEW: Teleprompter hotkey ---
                 if (event.key === '9' && !isInputFocused && !isTeleprompterActive) {
                     event.preventDefault();
                     startTeleprompter();
                 }
 
-                if (isTeleprompterActive && !isInputFocused) { // MODIFIED to use general focus check
+                if (isTeleprompterActive && !isInputFocused) {
                     if (event.key === ' ' || event.code === 'Space') {
                         event.preventDefault();
                         toggleAutoscroll();
@@ -627,6 +719,15 @@
             document.getElementById('teleprompter-focus-toggle').addEventListener('click', toggleTeleprompterFocus);
             document.getElementById('font-upload-input').addEventListener('change', handleFontUpload);
 
+            document.getElementById('teleprompter-theme-toggle').addEventListener('click', toggleTheme);
+            document.getElementById('go-to-page-btn').addEventListener('click', goToPage);
+            document.getElementById('page-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    goToPage();
+                }
+            });
+
             const searchInput = document.getElementById('teleprompter-search-input');
             searchInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
@@ -637,9 +738,31 @@
             searchInput.addEventListener('input', searchTeleprompter);
             document.getElementById('search-next-btn').addEventListener('click', () => navigateSearchResults(1));
             document.getElementById('search-prev-btn').addEventListener('click', () => navigateSearchResults(-1));
+            
+            // --- NEW: Event listeners for the controls modal ---
+            const openControlsBtn = document.getElementById('open-controls-btn');
+            const closeControlsBtn = document.getElementById('close-modal-btn');
+            const controlsModal = document.getElementById('controls-modal');
+
+            openControlsBtn.addEventListener('click', showControlsModal);
+            closeControlsBtn.addEventListener('click', hideControlsModal);
+
+            controlsModal.addEventListener('click', (event) => {
+                if (event.target === controlsModal) {
+                    hideControlsModal();
+                }
+            });
         });
 
-        // --- NEW: Rewritten search logic for phrases ---
+        // --- NEW: Functions to show/hide the controls modal ---
+        function showControlsModal() {
+            document.getElementById('controls-modal').style.display = 'flex';
+        }
+
+        function hideControlsModal() {
+            document.getElementById('controls-modal').style.display = 'none';
+        }
+
         function clearTeleprompterSearch() {
             const content = document.getElementById('teleprompter-content');
             content.querySelectorAll('.search-highlight, .current-search-highlight').forEach(el => {
@@ -709,7 +832,6 @@
                 if(input.value) input.style.boxShadow = '0 0 5px 1px var(--emphasize-color)';
             }
         }
-        // --- END of new search functions ---
 
         function saveScriptState() {
             const scriptHtml = document.getElementById('script-content').innerHTML;
@@ -722,6 +844,7 @@
                 displayResults(sampleText);
                 document.getElementById('suggestions-content').innerHTML = '';
             }
+            hideControlsModal();
         }
         
         function handleFontUpload(event) {
@@ -798,16 +921,19 @@
         function toggleFocusMode() {
             document.body.classList.toggle('focus-active');
             document.getElementById('app-layout').classList.toggle('focus-mode');
+            hideControlsModal();
         }
         
         function toggleTheme() {
             document.body.classList.toggle('light-mode');
             localStorage.setItem('theme', document.body.classList.contains('light-mode') ? 'light' : 'dark');
+            hideControlsModal();
         }
 
         function toggleSuggestions() {
             document.getElementById('app-layout').classList.toggle('suggestions-hidden');
             document.getElementById('suggestions-panel').classList.toggle('hidden');
+            hideControlsModal();
         }
 
         function handleFileUpload() {
@@ -836,6 +962,7 @@
                 reader.readAsText(file, 'UTF-8');
             }
             reader.onerror = handleError;
+            hideControlsModal();
         }
         
         function getPerformanceNotes() {
@@ -846,6 +973,7 @@
                 return;
             }
             sendTextForAnalysis(text);
+            hideControlsModal();
         }
 
         async function sendTextForAnalysis(text) {
@@ -1120,7 +1248,30 @@
             }
         }
         
-        // --- NEW: Function to calculate and update page number ---
+        function goToPage() {
+            const wrapper = document.getElementById('teleprompter-content-wrapper');
+            const input = document.getElementById('page-input');
+            const pageNum = parseInt(input.value, 10);
+
+            if (isNaN(pageNum)) {
+                return; 
+            }
+
+            const scrollHeight = wrapper.scrollHeight;
+            const clientHeight = wrapper.clientHeight;
+            const totalPages = Math.max(1, Math.ceil(scrollHeight / clientHeight));
+
+            if (pageNum > 0 && pageNum <= totalPages) {
+                wrapper.scrollTop = (pageNum - 1) * clientHeight;
+            } else {
+                input.style.boxShadow = '0 0 5px 1px var(--emphasize-color)';
+                setTimeout(() => {
+                    input.style.boxShadow = 'none';
+                }, 2000);
+            }
+            input.value = ''; 
+        }
+
         function updatePageNumber() {
             const wrapper = document.getElementById('teleprompter-content-wrapper');
             const display = document.getElementById('page-number-display');
@@ -1134,7 +1285,6 @@
                 return;
             }
 
-            // The focus zone is the vertical center of the viewport
             const focusZonePosition = wrapper.scrollTop + (clientHeight / 2);
             
             const currentPage = Math.floor(focusZonePosition / clientHeight) + 1;
@@ -1144,6 +1294,7 @@
         }
 
         function startTeleprompter() {
+            hideControlsModal();
             const mainScriptContent = document.getElementById('script-content');
             if (mainScriptContent.innerText.trim() === "") {
                 alert("Please upload a script first.");
@@ -1160,7 +1311,7 @@
             teleprompterContent.innerHTML = clonedContent.innerHTML; 
             teleprompterContent.addEventListener('click', handleTeleprompterWordClick);
 
-            wrapper.addEventListener('scroll', updatePageNumber); // MODIFIED: Add listener
+            wrapper.addEventListener('scroll', updatePageNumber);
 
             teleprompterOverlay.style.display = 'flex';
             document.body.style.overflow = 'hidden';
@@ -1170,7 +1321,7 @@
             document.getElementById('teleprompter-focus-toggle').classList.add('active');
             document.getElementById('teleprompter-content').style.fontSize = `${teleprompterFontSize}rem`;
 
-            setTimeout(updatePageNumber, 50); // MODIFIED: Initial calculation
+            setTimeout(updatePageNumber, 50);
         }
 
         function stopTeleprompter() {
@@ -1194,7 +1345,7 @@
             });
             teleprompterContent.removeEventListener('click', handleTeleprompterWordClick);
             
-            wrapper.removeEventListener('scroll', updatePageNumber); // MODIFIED: Remove listener
+            wrapper.removeEventListener('scroll', updatePageNumber);
 
             document.getElementById('teleprompter-search-input').value = '';
             clearTeleprompterSearch();
@@ -1203,13 +1354,13 @@
         function changeTeleprompterMargin(amount) {
             teleprompterMargin = Math.max(0, Math.min(45, teleprompterMargin + amount));
             document.getElementById('teleprompter-content-wrapper').style.padding = `5vh ${teleprompterMargin}vw`;
-            updatePageNumber(); // MODIFIED: Update on change
+            updatePageNumber();
         }
 
         function changeTeleprompterFontSize(amount) {
             teleprompterFontSize = Math.max(1, Math.min(8, teleprompterFontSize + amount));
             document.getElementById('teleprompter-content').style.fontSize = `${teleprompterFontSize}rem`;
-            updatePageNumber(); // MODIFIED: Update on change
+            updatePageNumber();
         }
         
         function toggleTeleprompterFocus() {
